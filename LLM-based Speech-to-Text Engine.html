@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="description" content="LLM-based Speech-to-Text Engine with live STT and TTS in the browser." />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LLM-based Speech-to-Text Engine</title>
+
+  <!-- Libraries -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* -------------------- THEME TOKENS -------------------- */
+    :root{
+      --bg-dark:#0b0c15;
+      --bg-grad-1:#171a35;
+      --bg-grad-2:#0e1127;
+      --text:#e9ebff;
+      --muted:#a6add6;
+      --primary:#7c5cff;
+      --accent:#2ee6a6;
+      --warning:#ffd062;
+      --danger:#ff5c93;
+      --glow:0 0 16px rgba(124,92,255,.55), 0 0 44px rgba(124,92,255,.28);
+      --radius:24px;
+    }
+
+    /* Base */
+    *{ box-sizing:border-box }
+    html,body{ height:100% }
+    body{
+      margin:0;
+      color:var(--text);
+      font-family:"Poppins",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      background:
+        radial-gradient(1200px 700px at 10% 15%, #1c2250 0%, #0b0c15 60%) fixed,
+        radial-gradient(1000px 800px at 90% 25%, #121633 0%, #0b0c15 70%) fixed,
+        linear-gradient(120deg, var(--bg-grad-2) 0%, var(--bg-dark) 100%);
+      overflow-x:hidden;
+    }
+
+    /* Ambient soft blobs */
+    .ambient::before,
+    .ambient::after{
+      content:"";
+      position:fixed; inset:-25vmax; z-index:0; pointer-events:none;
+      background:
+        radial-gradient(closest-side at 20% 30%, rgba(124,92,255,.22), transparent 60%),
+        radial-gradient(closest-side at 80% 70%, rgba(46,230,166,.18), transparent 60%);
+      filter: blur(42px);
+      animation: breathe 18s ease-in-out infinite alternate;
+    }
+    .ambient::after{ animation-duration:24s; opacity:.9 }
+    @keyframes breathe{
+      from{ transform: translate3d(-2%,-1%,0) rotate(.6deg) }
+      to{   transform: translate3d( 2%, 1%,0) rotate(-.6deg) }
+    }
+    /* Respect users who prefer reduced motion */
+    @media (prefers-reduced-motion: reduce){
+      .ambient::before,.ambient::after{ animation: none }
+      .mic{ animation: none }
+    }
+
+    /* -------------------- LAYOUT -------------------- */
+    .navbar{
+      background: rgba(14,17,39,.55);
+      backdrop-filter: blur(10px);
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+
+    .hero{
+      position:relative; z-index:1;
+      max-width:1100px; margin: 42px auto 18px; padding: 0 16px;
+    }
+    .hero-title{
+      font-size:clamp(28px,6vw,46px); font-weight:800; line-height:1.06;
+      letter-spacing:.2px; margin:10px 0 6px;
+      text-shadow:0 10px 40px rgba(0,0,0,.5);
+    }
+    .text-gradient{
+      background: linear-gradient(90deg,var(--primary),#9b85ff,var(--accent));
+      -webkit-background-clip:text; background-clip:text; color:transparent;
+      filter: drop-shadow(0 0 18px rgba(124,92,255,.25));
+    }
+    .text-muted-2{ color:var(--muted) }
+
+    /* Reusable “glass” card */
+    .glass{
+      position:relative; z-index:1;
+      background:linear-gradient(180deg,rgba(26,30,58,.7),rgba(16,19,37,.6));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:var(--radius);
+      box-shadow:0 14px 36px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.06);
+      backdrop-filter:blur(12px);
+      overflow:hidden;
+    }
+    .glass::before{
+      content:""; position:absolute; inset:-2px; border-radius:inherit; padding:2px;
+      background: conic-gradient(from 220deg at 50% 50%, rgba(124,92,255,.22), rgba(46,230,166,.18), transparent, rgba(124,92,255,.22));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      filter: blur(9px); pointer-events:none;
+    }
+
+    /* Tabs */
+    .nav-pills .nav-link{
+      border-radius:12px; font-weight:700; color:var(--text);
+      background: rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09);
+    }
+    .nav-pills .nav-link.active{
+      background: linear-gradient(135deg, var(--primary), #9b85ff);
+      color:#0b0c15; box-shadow: var(--glow);
+    }
+
+    /* Inputs */
+    .form-control,.form-select{
+      background: rgba(255,255,255,.05); color:var(--text);
+      border:1px solid rgba(255,255,255,.1); border-radius:14px;
+    }
+    .form-control:focus,.form-select:focus{
+      border-color: rgba(46,230,166,.6); box-shadow: 0 0 0 4px rgba(46,230,166,.18);
+    }
+    textarea{ resize:vertical; min-height:120px }
+    .char-count{ font-size:12px; color:var(--muted) }
+
+    /* Buttons */
+    .btn-pro{
+      border:none; border-radius:14px; font-weight:800; letter-spacing:.2px;
+      padding:12px 16px; transition: transform .15s, filter .15s;
+      box-shadow: var(--glow);
+      background: linear-gradient(135deg, var(--primary), #9b85ff);
+      color:#0b0c15;
+    }
+    .btn-pro:hover{ transform: translateY(-1px); filter: brightness(1.03) }
+    .btn-accent{ background:linear-gradient(135deg,var(--accent),#63f2c6); color:#0b0c15 }
+    .btn-danger-soft{ background:linear-gradient(135deg,var(--danger),#ff7aa7); color:#0b0c15 }
+    .btn-ghost{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); color:var(--text) }
+
+    /* Output */
+    #speechOutput{
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.03));
+      border:1px solid rgba(255,255,255,.1);
+      border-radius:14px; padding:14px 16px; min-height:90px;
+    }
+
+    /* Mic pulse */
+    .mic{
+      width:54px; height:54px; border-radius:50%;
+      display:grid; place-items:center; cursor:pointer; user-select:none;
+      background: radial-gradient(circle at 30% 30%, #fff, #dad9ff);
+      color:#0c1022; font-weight:900; font-size:20px;
+      box-shadow: 0 0 0 0 rgba(124,92,255,.55);
+      animation: pulse 2s infinite;
+    }
+    .mic.active{
+      animation: pulse-fast 1.2s infinite;
+      background: radial-gradient(circle at 30% 30%, #eafff7, #baffea);
+    }
+    @keyframes pulse{
+      0%{ box-shadow:0 0 0 0 rgba(124,92,255,.45) }
+      70%{ box-shadow:0 0 0 18px rgba(124,92,255,0) }
+      100%{ box-shadow:0 0 0 0 rgba(124,92,255,0) }
+    }
+    @keyframes pulse-fast{
+      0%{ box-shadow:0 0 0 0 rgba(46,230,166,.5) }
+      70%{ box-shadow:0 0 0 16px rgba(46,230,166,0) }
+      100%{ box-shadow:0 0 0 0 rgba(46,230,166,0) }
+    }
+
+    .footer{ color:var(--muted); font-size:12px; text-align:center; padding:16px 0 24px }
+    .sr-only{ position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  </style>
+</head>
+<body class="ambient">
+  <!-- Skip link for keyboard/screen reader users -->
+  <a class="sr-only" href="#app">Skip to app</a>
+
+  <!-- ================ NAVBAR ================ -->
+  <nav class="navbar navbar-expand-lg navbar-dark sticky-top" role="navigation" aria-label="Main navigation">
+    <div class="container">
+      <a class="navbar-brand fw-bold" href="#">LLM-based Speech-to-Text Engine</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div id="navMain" class="collapse navbar-collapse">
+        <ul class="navbar-nav ms-3">
+          <li class="nav-item">
+            <a class="nav-link active" href="#" aria-current="page">Home</a>
+          </li>
+        </ul>
+
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <span id="proBadge" class="badge rounded-pill text-dark" style="background:linear-gradient(135deg,var(--accent),#63f2c6); display:none;">PRO</span>
+          <button id="btnUpgrade" class="btn btn-sm btn-accent" type="button" aria-label="Upgrade to Pro">⚡ Upgrade</button>
+
+          <div id="authBtns" class="d-flex gap-2" aria-label="Authentication">
+            <button class="btn btn-sm btn-pro" type="button" data-bs-toggle="modal" data-bs-target="#loginModal">
+              <i class="bi bi-box-arrow-in-right me-1" aria-hidden="true"></i>Log in
+            </button>
+            <button class="btn btn-sm btn-danger-soft" type="button" data-bs-toggle="modal" data-bs-target="#registerModal">
+              <i class="bi bi-person-plus me-1" aria-hidden="true"></i>Register
+            </button>
+          </div>
+
+          <div id="userMenu" class="dropdown" style="display:none;">
+            <button class="btn btn-sm btn-ghost dropdown-toggle" data-bs-toggle="dropdown" id="userDrop" aria-expanded="false">User</button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDrop">
+              <li><h6 class="dropdown-header" id="userEmail">user@example.com</h6></li>
+              <li><button class="dropdown-item" id="btnLogout" type="button"><i class="bi bi-box-arrow-right me-2" aria-hidden="true"></i>Log out</button></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ================ HERO ================ -->
+  <header class="hero" role="banner">
+    <div class="row g-4 align-items-center">
+      <div class="col-lg-7">
+        <h1 class="hero-title">
+          Speak, See, and Share — <span class="text-gradient">instantly</span>.
+        </h1>
+        <p class="text-muted-2 mb-3">
+          Glassy cards, live transcription, multilingual voices. All in your browser—no server required.
+        </p>
+
+        <div class="d-flex gap-2 mt-2">
+          <a href="#app" class="btn btn-pro" role="button">
+            <i class="bi bi-lightning-charge-fill me-1" aria-hidden="true"></i>Open App
+          </a>
+          <button id="btnTryMic" class="btn btn-ghost" type="button">
+            <i class="bi bi-mic-fill me-1" aria-hidden="true"></i>Try Microphone
+          </button>
+        </div>
+      </div>
+
+      <div class="col-lg-5">
+        <aside class="glass p-4" aria-label="Microphone demo">
+          <div class="d-flex align-items-center gap-3">
+            <div class="mic" id="heroMic" aria-hidden="true">🎙️</div>
+            <div>
+              <div class="fw-bold">Interactive Mic</div>
+              <div class="text-secondary small">Click to see pulse animation • Space toggles mic in app</div>
+            </div>
+          </div>
+          <hr class="text-white-50" />
+          <p class="small text-secondary mb-0">Tip: Chrome recommended. Your audio stays on-device.</p>
+        </aside>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================ APP ================ -->
+  <main id="app" class="container my-4" role="main">
+    <section class="glass p-4 p-md-5" aria-label="Speech tools">
+      <!-- Tabs -->
+      <ul class="nav nav-pills mb-3" id="toolsTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-tts" data-bs-toggle="pill" data-bs-target="#panel-tts" type="button" role="tab" aria-controls="panel-tts" aria-selected="true">
+            🔊 Text → Voice (TTS)
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-stt" data-bs-toggle="pill" data-bs-target="#panel-stt" type="button" role="tab" aria-controls="panel-stt" aria-selected="false">
+            🎤 Voice → Text (STT)
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content">
+        <!-- TTS PANEL -->
+        <div class="tab-pane fade show active" id="panel-tts" role="tabpanel" aria-labelledby="tab-tts">
+          <div class="row g-3">
+            <div class="col-12">
+              <label for="textInput" class="form-label">Enter text to speak</label>
+              <textarea id="textInput" class="form-control" placeholder="Write something to speak…" maxlength="5000" aria-describedby="ttsHelp"></textarea>
+              <div class="d-flex justify-content-between mt-1">
+                <small id="ttsHelp" class="char-count"><span id="charNow">0</span>/<span id="charMax">300</span> characters</small>
+                <small class="text-secondary">Select a voice to match language & tone</small>
+              </div>
+            </div>
+
+            <div class="col-md-8">
+              <label for="voiceSelect" class="form-label">Voice</label>
+              <select id="voiceSelect" class="form-select" aria-label="Choose TTS voice"></select>
+            </div>
+
+            <div class="col-md-4 d-flex align-items-end gap-2">
+              <button id="btnSpeak" class="btn btn-pro w-100" type="button">
+                <i class="bi bi-megaphone me-1" aria-hidden="true"></i>Speak
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- STT PANEL -->
+        <div class="tab-pane fade" id="panel-stt" role="tabpanel" aria-labelledby="tab-stt">
+          <div class="row g-3 align-items-center">
+            <div class="col-12 col-md-6 d-flex align-items-center gap-2 flex-wrap">
+              <button id="mic" class="mic" type="button" title="Start / Stop microphone" aria-pressed="false" aria-label="Toggle microphone">🎙️</button>
+              <button id="btnSave" class="btn btn-accent" type="button">
+                <i class="bi bi-download me-1" aria-hidden="true"></i>Save Transcript
+              </button>
+              <button id="btnClear" class="btn btn-danger-soft" type="button">
+                <i class="bi bi-eraser me-1" aria-hidden="true"></i>Clear
+              </button>
+            </div>
+
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="langSelect">Recognition Language</label>
+              <select id="langSelect" class="form-select" aria-label="Choose recognition language">
+                <option value="">Auto (use selected voice if possible)</option>
+                <option value="en-US">English (US)</option>
+                <option value="en-GB">English (UK)</option>
+                <option value="bn-BD">Bangla (Bangladesh)</option>
+                <option value="bn-IN">Bangla (India)</option>
+                <option value="hi-IN">Hindi (India)</option>
+              </select>
+              <div class="form-text">Press <kbd>Space</kbd> anywhere to toggle mic.</div>
+            </div>
+
+            <div class="col-12">
+              <!-- aria-live ensures screen readers announce new text -->
+              <div id="speechOutput" role="status" aria-live="polite">Awaiting speech input…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="small text-secondary mt-3 mb-0">
+        Free: TTS up to 300 chars •
+        <span class="badge text-dark" style="background:linear-gradient(135deg,var(--accent),#63f2c6)">PRO: 5000+</span>
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer" role="contentinfo">
+    Web Speech API • Client-side only • Your audio never leaves the browser
+  </footer>
+
+  <!-- Your existing modals + full JS logic (auth, TTS, STT) can be kept as-is below -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // Minimal helpers so the page remains self-contained.
+    const $ = (id) => document.getElementById(id);
+
+    // Live character counter (kept tiny & readable)
+    (function attachCharCount(){
+      const input = $('textInput');
+      const now   = $('charNow');
+      if(!input) return;
+      const update = () => now.textContent = (input.value || '').length;
+      input.addEventListener('input', update); update();
+    })();
+
+    // Small UX: demo mic pulse on hero card
+    (function heroMicDemo(){
+      const btn = $('btnTryMic');
+      const mic = $('heroMic');
+      if(!btn || !mic) return;
+      btn.addEventListener('click', () => mic.classList.toggle('active'));
+    })();
+
+    // NOTE: keep your full auth / TTS / STT logic from your previous file below this comment.
+    // (I left IDs and structure identical so your existing JS will continue to work.)
+  </script>
+  <script>
+  // ---------- TTS: voice loader + speak ----------
+  (function TTS() {
+    const voiceSelect = document.getElementById('voiceSelect');
+    const textInput   = document.getElementById('textInput');
+    const btnSpeak    = document.getElementById('btnSpeak');
+
+    if (!voiceSelect || !btnSpeak) return;
+
+    let voices = [];
+    let tries = 0;
+
+    function fillVoices() {
+      const list = window.speechSynthesis.getVoices();
+      if (!list || list.length === 0) return false;
+
+      voices = list;
+      voiceSelect.innerHTML = '';
+      list.forEach((v, i) => {
+        const op = document.createElement('option');
+        op.value = i;
+        op.textContent = `${v.name} — ${v.lang}${v.default ? ' (default)' : ''}`;
+        voiceSelect.appendChild(op);
+      });
+      return true;
+    }
+
+    // 1) try now
+    fillVoices();
+
+    // 2) try again when chrome finishes loading voices
+    window.speechSynthesis.onvoiceschanged = () => fillVoices();
+
+    // 3) defensive: retry a few times (some systems are slow)
+    const retry = setInterval(() => {
+      if (fillVoices() || ++tries > 10) clearInterval(retry);
+    }, 300);
+
+    // Speak handler
+    btnSpeak.addEventListener('click', () => {
+      const text = (textInput?.value || '').trim();
+      if (!text) { alert('Please type something first.'); return; }
+
+      const utter = new SpeechSynthesisUtterance(text);
+
+      // pick selected voice if available
+      const idx = parseInt(voiceSelect.value, 10);
+      if (!Number.isNaN(idx) && voices[idx]) utter.voice = voices[idx];
+
+      // optional tuning
+      utter.rate  = 1;   // 0.1 - 10
+      utter.pitch = 1;   // 0 - 2
+      // utter.lang  = voices[idx]?.lang || 'en-US';
+
+      // stop any current speech then speak
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    });
+  })();
+</script>
+
+</body>
+</html>
